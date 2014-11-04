@@ -24,7 +24,7 @@
 
 using namespace std;
 
-
+// helper methods :)
 void displayPolygon();
 void register3DScene();
 void drawRGBScene();
@@ -38,7 +38,10 @@ void drawDepthScene();
 void rotateCamera();
 
 
-//define OpenGL variables
+/*
+ * Basic OpenGL and logic variables defined here
+ *
+ */
 GLuint gl_depth_tex;
 GLuint gl_rgb_tex;
 int g_argc;
@@ -54,7 +57,9 @@ int showScene = 0;
 std::vector<uint16_t> sceneDepth(640*480*4);
 std::vector<uint8_t> sceneRGB(640*480*4);
 
-//define libfreenect variables
+/*
+ * Libfreenect variables
+ */
 Freenect::Freenect freenect;
 MyFreenectDevice* device;
 double freenect_angle(0);
@@ -62,6 +67,10 @@ freenect_video_format requested_video_format(FREENECT_VIDEO_IR_8BIT);//FREENECT_
 freenect_depth_format requested_depth_format(FREENECT_DEPTH_REGISTERED);
 
 
+/*
+ * TESTING OpenGL
+ * Simple method to draw simple polygons 
+ */
 void displayPolygon() {
 
   // Set every pixel in the frame buffer to the current clear color.
@@ -94,6 +103,10 @@ void displayPolygon() {
 	glutSwapBuffers();
 }
 
+
+/*
+ * Rotates the camera to show 3D points
+ */
 void rotateCamera() {
 	static double angle = 0.;
 	static double radius = 3.;
@@ -105,42 +118,11 @@ void rotateCamera() {
 	angle += 0.05;
 }
 
-void registerKinectData() {
-	static std::vector<uint8_t> depth(640*480*4);
-	static std::vector<uint8_t> rgb(640*480*4);
 
-	bool depth_registered = false;
-	bool rgb_registered = false;
-
-	while(!depth_registered)
-		depth_registered = device->getDepth(depth);
-	while(!rgb_registered)
-		rgb_registered = device->getRGB(rgb);
-
-	printf("\n depth was registered: %d", depth_registered);
-	printf("\n rgb was registered: %d", rgb_registered);
-
-	//display();
-    //rotateCamera();
-	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	// glLoadIdentity();
-	// glViewport(0, 0, (float)WIDTH, HEIGHT/2);
-	// glPointSize(10.0f);
-
- //    glBegin(GL_POINTS);
- //    for (int i = 0; i < WIDTH*HEIGHT; ++i) {
-	// 	if(i < 10) {
-	// 		printf("\n color 1: %d \n color 2: %d \n color 3: %d \n", rgb[i*3], rgb[i*3+1], rgb[i*3+2]);
-	// 		printf("\n depth 1: %d \n depth 2: %d \n depth 3: %d \n", depth[i*3], depth[i*3+1], depth[i*3+2]);
- //        }
- //        glColor3f((float)rgb[i*3]/255, (float)rgb[i*3+1]/255, (float)rgb[i*3+2]/255);
- //        glVertex3f((float)depth[i*3]/255, (float)depth[i*3+1]/255, (float)depth[i*3+2]/255);
- //    }
- //    glEnd();
-}
-
-//define Kinect Device control elements
-//glutKeyboardFunc Handler
+/*
+ * Define Kinect's keyboard controls
+ * glutKeyboardFunc Handler
+ */
 void keyPressed(unsigned char key, int x, int y) {
 	if (key == 27) {
 		device->setLed(LED_OFF);
@@ -215,7 +197,7 @@ void keyPressed(unsigned char key, int x, int y) {
 
 
 
-//define OpenGL functions
+//show the current kinect RGB scene
 void drawRGBScene() {
 	//static std::vector<uint8_t> depth(640*480*4);
 	static std::vector<uint8_t> rgb(640*480*4);
@@ -225,6 +207,7 @@ void drawRGBScene() {
 		freenect_angle = device->getState().getTiltDegs();
 	}*/
 	device->updateState();
+	//cout << "Device tilt angle: " << device->getState().getTiltDegs();
 	printf("\r demanded tilt angle: %+4.2f device tilt angle: %+4.2f", freenect_angle, device->getState().getTiltDegs());
 	fflush(stdout);
 
@@ -291,13 +274,8 @@ void drawDepthScene() {
 }
 
 
-void mainDisplay() {
-	glClearColor(0.8, 0.8, 0.8, 0.0);  
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glutSwapBuffers();
-}
-
+// Registers 3D depth points from the Kinect
 void register3DScene() {
 	bool depth_registered = false;
 	bool rgb_registered = false;
@@ -311,6 +289,7 @@ void register3DScene() {
 	printf("\n rgb was registered: %d", rgb_registered);
 }
 
+//Shows the axis alignment
 void showAxis() {
 	 //draw axis lines//
 	 
@@ -339,6 +318,7 @@ void showAxis() {
 
 }
 
+// Constructs 3D point cloud scene
 void constructScene() {
 		//displayPolygon();
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -367,7 +347,7 @@ void constructScene() {
 		    		float z = (float)sceneDepth[i]/10;
 		    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
 		    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
-  	  				glVertex3f(x/10, y/10, z/10);
+  	  				glVertex3f(x/20, y/20, z/20);
 			}
 		    glEnd();
 		}else {
@@ -377,6 +357,11 @@ void constructScene() {
 	    glutSwapBuffers();
 }
 
+/*
+ * Initialize OpenGL variables for 3D perspective projection
+ * Currently: used for botton "point cloud" window 
+ * 
+ */
 void defaultGL() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClearDepth(1.0);
@@ -392,6 +377,10 @@ void defaultGL() {
 	gluLookAt(0,0,0,0,0,1,0,0,0);
 }
 
+/*
+ * Initialize OpenGL variables for 2D texture drawings
+ * Currently: used for top 2 windows
+ */
 void InitGL() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClearDepth(1.0);
@@ -411,6 +400,10 @@ void InitGL() {
 	glMatrixMode(GL_MODELVIEW);
 }
 
+/*
+ * Glut idle function
+ * Redraws all of the windows regardless of window focus
+ */
 void idle() {
 	int currentWindow = glutGetWindow();
 	glutSetWindow(window);
@@ -424,6 +417,18 @@ void idle() {
 	glutSetWindow(currentWindow);
 }
 
+// Main Window that carries the subwindows
+void mainDisplay() {
+	glClearColor(0.8, 0.8, 0.8, 0.0);  
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glutSwapBuffers();
+}
+
+/*
+ * Sets up the GLUT display
+ * Currently: 3 Windows
+ */
 void setUpDisplay(MyFreenectDevice* device){
 	glutInit(&g_argc, g_argv);
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
@@ -431,7 +436,7 @@ void setUpDisplay(MyFreenectDevice* device){
 	glutInitWindowPosition(INIT_POS_X, INIT_POS_Y);
 
 	//
-	window = glutCreateWindow("3D Scene");
+	window = glutCreateWindow("Kinect 3D Scene");
 		glutDisplayFunc(mainDisplay);
 		//glutDisplayFunc(&DrawGLScene);
 		//glutIdleFunc(&DrawGLScene);
@@ -453,7 +458,11 @@ void setUpDisplay(MyFreenectDevice* device){
 	glutIdleFunc(idle);
 	glutMainLoop();
 }
-//define main function
+
+/*
+ * MAIN: main loop
+ * Init libfreenect, OpenGL (GLUT windows)
+ */
 int main(int argc, char **argv) {
 	//Get Kinect Device
 	device = &freenect.createDevice<MyFreenectDevice>(0);
@@ -466,9 +475,13 @@ int main(int argc, char **argv) {
 	device->setLed(LED_GREEN);
 	setUpDisplay(device);
 	//cout << "Focal Length: " << reference_distance;
+
+
 	//Stop Kinect Device
 	device->stopVideo();
 	device->stopDepth();
 	device->setLed(LED_OFF);
+
+	//RETURN
 	return 1;
 }
