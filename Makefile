@@ -1,26 +1,20 @@
-#BJS specifies which files to compile as part of the project
-OBJS = main.cpp
- 
-# CC specifies which compiler we're using
 CC = g++
- 
-# INCLUDE_PATHS specifies the additional include paths we'll need
-INCLUDE_PATHS = -I/usr/local/include -I/opt/X11/include
- 
-# LIBRARY_PATHS specifies the additional library paths we'll need
-LIBRARY_PATHS = -L/usr/local/lib -I/opt/X11/lib
- 
-# COMPILER_FLAGS specifies the additional compilation options we're using
-# -w suppresses all warnings
-COMPILER_FLAGS = -w
- 
-# LINKER_FLAGS specifies the libraries we're linking against
-# Cocoa, IOKit, and CoreVideo are needed for static GLFW3.
-LINKER_FLAGS = -framework OpenGL -lglfw3 -lglew
- 
-# OBJ_NAME specifies the name of our exectuable
-OBJ_NAME = main
- 
-#This is the target that compiles our executable
-all : $(OBJS)
-	$(CC) $(OBJS) $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(COMPILER_FLAGS) $(LINKER_FLAGS) -o $(OBJ_NAME)
+LD = g++
+LDFLAGS = -L/usr/local/lib/
+CFLAGS=-g -Wall `pkg-config --cflags libfreenect` -lopengl32 -lglut32 -I/usr/local/include/libfreenect -I/usr/local/include/libusb-1.0 
+#12 -lGL -lGLU -lglut
+LIBS = -lfreenect -framework GLUT -framework OpenGL -lglfw3 -lglew  #-lGL -lGLU -lglut 
+OBJECTS = mutex.o myfreenectdevice.o main.o
+PROG = 3Dscene
+
+all:$(PROG)
+
+$(PROG): $(OBJECTS)
+	$(LD) $(LDFLAGS) $(LIBS) $(OBJECTS) -o $(PROG)
+
+%.o: %.cpp
+	$(CC) $(CFLAGS)  $(LIBS) -c $<
+
+clean:
+	rm -rf *.o $(PROG)
+

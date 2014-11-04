@@ -1,144 +1,474 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
+#include <libfreenect.hpp>
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <math.h>
+#include <pthread.h>
 
-// Define some of the global variables we're using for this sample
-GLuint program;
-GLuint vao;
 
-// This is the callback we'll be registering with GLFW for errors.
-// It'll just print out the error to the STDERR stream.
-void error_callback(int error, const char* description) {
-  fputs(description, stderr);
+//Local headers
+#include "defs.h"
+#include "myfreenectdevice.h"
+
+
+// OpenGL
+#if defined(__APPLE__)
+#include <GLUT/glut.h>
+#include <OpenGL/gl.h>
+#include <OpenGL/glu.h>
+#else
+#include <GL/glut.h>
+#include <GL/gl.h>
+#include <GL/glu.h>
+#endif
+
+using namespace std;
+
+
+void displayPolygon();
+void register3DScene();
+void drawRGBScene();
+void idle();
+void InitGL();
+void defaultGL();
+void constructScene();
+void showAxis();
+void mainDisplay();
+void drawDepthScene();
+void rotateCamera();
+
+
+//define OpenGL variables
+GLuint gl_depth_tex;
+GLuint gl_rgb_tex;
+int g_argc;
+char **g_argv;
+int got_frames(0);
+int window(0);
+int subWindow1(0);
+int subWindow2(0);
+int subWindow3(0);
+
+int showScene = 0;
+
+std::vector<uint16_t> sceneDepth(640*480*4);
+std::vector<uint8_t> sceneRGB(640*480*4);
+
+//define libfreenect variables
+Freenect::Freenect freenect;
+MyFreenectDevice* device;
+double freenect_angle(0);
+freenect_video_format requested_video_format(FREENECT_VIDEO_IR_8BIT);//FREENECT_VIDEO_RGB
+freenect_depth_format requested_depth_format(FREENECT_DEPTH_REGISTERED);
+
+
+void displayPolygon() {
+
+  // Set every pixel in the frame buffer to the current clear color.
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glLoadIdentity();//load identity matrix
+	glDisable(GL_TEXTURE_2D);
+
+    //glTranslatef(0.0f,0.0f,-4.0f);//move forward 4 units
+    
+    glColor3f(0.0f,0.0f,1.0f); //blue color
+        
+    glBegin(GL_POLYGON);//begin drawing of polygon
+      glVertex3f(-0.5f,0.5f,0.0f);//first vertex
+      glVertex3f(0.5f,0.5f,0.0f);//second vertex
+      glVertex3f(1.0f,0.0f,0.0f);//third vertex
+      glVertex3f(0.5f,-0.5f,0.0f);//fourth vertex
+      glVertex3f(-0.5f,-0.5f,0.0f);//fifth vertex
+      glVertex3f(-1.0f,0.0f,0.0f);//sixth vertex
+    glEnd();//end drawing of polygon
+
+    // glBegin(GL_POLYGON);//begin drawing of polygon
+    //   //glVertex3f(-0.5f,0.5f,0.0f);//first vertex
+    //   //glVertex3f(0.5f,0.5f,0.0f);//second vertex
+    //   glVertex3f(320,0,0.0f);//third vertex
+    //   glVertex3f(640,240,0.0f);//fourth vertex
+    //   glVertex3f(320,480,0.0f);//fifth vertex
+    //   glVertex3f(0,240,0.0f);//sixth vertex
+    // glEnd();//end drawing of polygon
+	glutSwapBuffers();
 }
 
-// This is the callback we'll be registering with GLFW for keyboard handling.
-// The only thing we're doing here is setting up the window to close when we press ESC
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-  if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-  {
-    glfwSetWindowShouldClose(window, GL_TRUE);
-  }
+void rotateCamera() {
+	static double angle = 0.;
+	static double radius = 3.;
+	double x = radius*sin(angle);
+	double z = radius*(1-cos(angle)) - radius/2;
+	glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+	gluLookAt(x,0,z,0,0,radius/2,0,-1,0);
+	angle += 0.05;
 }
 
-int main() {
-  // Initialize GLFW, and if it fails to initialize for any reason, print it out to STDERR.
-  if (!glfwInit()) {
-    fprintf(stderr, "Failed initialize GLFW.");
-    exit(EXIT_FAILURE);
-  }
+void registerKinectData() {
+	static std::vector<uint8_t> depth(640*480*4);
+	static std::vector<uint8_t> rgb(640*480*4);
 
-  // Set the error callback, as mentioned above.
-  glfwSetErrorCallback(error_callback);
+	bool depth_registered = false;
+	bool rgb_registered = false;
 
-  // Set up OpenGL options.
-  // Use OpenGL verion 4.1,
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-  // GLFW_OPENGL_FORWARD_COMPAT specifies whether the OpenGL context should be forward-compatible, i.e. one where all functionality deprecated in the requested version of OpenGL is removed.
-  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-  // Indicate we only want the newest core profile, rather than using backwards compatible and deprecated features.
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  // Make the window resize-able.
-  glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+	while(!depth_registered)
+		depth_registered = device->getDepth(depth);
+	while(!rgb_registered)
+		rgb_registered = device->getRGB(rgb);
 
-  // Create a window to put our stuff in.
-  GLFWwindow* window = glfwCreateWindow(800, 600, "OpenGL", NULL, NULL);
+	printf("\n depth was registered: %d", depth_registered);
+	printf("\n rgb was registered: %d", rgb_registered);
 
-  // If the window fails to be created, print out the error, clean up GLFW and exit the program.
-  if(!window) {
-    fprintf(stderr, "Failed to create GLFW window.");
-    glfwTerminate();
-    exit(EXIT_FAILURE);
-  }
+	//display();
+    //rotateCamera();
+	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// glLoadIdentity();
+	// glViewport(0, 0, (float)WIDTH, HEIGHT/2);
+	// glPointSize(10.0f);
 
-  // Use the window as the current context (everything that's drawn will be place in this window).
-  glfwMakeContextCurrent(window);
+ //    glBegin(GL_POINTS);
+ //    for (int i = 0; i < WIDTH*HEIGHT; ++i) {
+	// 	if(i < 10) {
+	// 		printf("\n color 1: %d \n color 2: %d \n color 3: %d \n", rgb[i*3], rgb[i*3+1], rgb[i*3+2]);
+	// 		printf("\n depth 1: %d \n depth 2: %d \n depth 3: %d \n", depth[i*3], depth[i*3+1], depth[i*3+2]);
+ //        }
+ //        glColor3f((float)rgb[i*3]/255, (float)rgb[i*3+1]/255, (float)rgb[i*3+2]/255);
+ //        glVertex3f((float)depth[i*3]/255, (float)depth[i*3+1]/255, (float)depth[i*3+2]/255);
+ //    }
+ //    glEnd();
+}
 
-  // Set the keyboard callback so that when we press ESC, it knows what to do.
-  glfwSetKeyCallback(window, key_callback);
+//define Kinect Device control elements
+//glutKeyboardFunc Handler
+void keyPressed(unsigned char key, int x, int y) {
+	if (key == 27) {
+		device->setLed(LED_OFF);
+		freenect_angle = 0;
+		glutDestroyWindow(window);
+	}
+	if (key == '1') {
+		device->setLed(LED_GREEN);
+	}
+	if (key == '2') {
+		device->setLed(LED_RED);
+	}
+	if (key == '3') {
+		device->setLed(LED_YELLOW);
+	}
+	if (key == '4') {
+		device->setLed(LED_BLINK_GREEN);
+	}
+	if (key == '5') {
+		// 5 is the same as 4
+		device->setLed(LED_BLINK_GREEN);
+	}
+	if (key == '6') {
+		device->setLed(LED_BLINK_RED_YELLOW);
+	}
+	if (key == '0') {
+		device->setLed(LED_OFF);
+	}
+	if (key == 'd') {
+		device->setDepthFormat(requested_depth_format);
+	}
+	if (key == 'f') {
+		if (requested_video_format == FREENECT_VIDEO_IR_8BIT) {
+			requested_video_format = FREENECT_VIDEO_RGB;
+		} else if (requested_video_format == FREENECT_VIDEO_RGB){
+			requested_video_format = FREENECT_VIDEO_YUV_RGB;
+		} else {
+			requested_video_format = FREENECT_VIDEO_IR_8BIT;
+		}
+		device->setVideoFormat(requested_video_format);
+	}
 
-  printf("OpenGL version supported by this platform (%s): \n", glGetString(GL_VERSION));
+	if (key == 'w') {
+		freenect_angle++;
+		if (freenect_angle > 30) {
+			freenect_angle = 30;
+		}
+	}
+	if (key == 's' || key == 'd') {
+		freenect_angle = 10;
+	}
+	if (key == 'x') {
+		freenect_angle--;
+		if (freenect_angle < -30) {
+			freenect_angle = -30;
+		}
+	}
+	if (key == 'e') {
+		freenect_angle = 10;
+	}
+	if (key == 'c') {
+		freenect_angle = -10;
+	}
 
-  // Makes sure all extensions will be exposed in GLEW and initialize GLEW.
-  glewExperimental = GL_TRUE;
-  glewInit();
+	if (key == 'v') {
+		register3DScene();
+		showScene = 1;
+	}
 
-  // Shaders is the next part of our program. Notice that we use version 410 core. This has to match our version of OpenGL we are using, which is the core profile in version 4.1, thus 410 core.
+	device->setTiltDegrees(freenect_angle);
+}
 
-  // Vertex shader source code. This draws the vertices in our window. We have 3 vertices since we're drawing an triangle.
-  // Each vertex is represented by a vector of size 4 (x, y, z, w) coordinates.
-  static const char * vs_source[] =
-  {
-      "#version 410 core                                                 \n"
-      "                                                                  \n"
-      "void main(void)                                                   \n"
-      "{                                                                 \n"
-      "    const vec4 vertices[] = vec4[](vec4( 0.25, -0.25, 0.5, 1.0),  \n"
-      "                                   vec4(-0.25, -0.25, 0.5, 1.0),  \n"
-      "                                   vec4( 0.25,  0.25, 0.5, 1.0)); \n"
-      "                                                                  \n"
-      "    gl_Position = vertices[gl_VertexID];                          \n"
-      "}                                                                 \n"
-  };
 
-  // Fragment shader source code. This determines the colors in the fragment generated in the shader pipeline. In this case, it colors the inside of our triangle specified by our vertex shader.
-  static const char * fs_source[] =
-  {
-      "#version 410 core                                                 \n"
-      "                                                                  \n"
-      "out vec4 color;                                                   \n"
-      "                                                                  \n"
-      "void main(void)                                                   \n"
-      "{                                                                 \n"
-      "    color = vec4(0.0, 0.8, 1.0, 1.0);                             \n"
-      "}                                                                 \n"
-  };
 
-  // This next section we'll generate the OpenGL program and attach the shaders to it so that we can render our triangle.
-  program = glCreateProgram();
+//define OpenGL functions
+void drawRGBScene() {
+	//static std::vector<uint8_t> depth(640*480*4);
+	static std::vector<uint8_t> rgb(640*480*4);
 
-  // We create a shader with our fragment shader source code and compile it.
-  GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fs, 1, fs_source, NULL);
-  glCompileShader(fs);
+	// using getTiltDegs() in a closed loop is unstable
+	/*if(device->getState().m_code == TILT_STATUS_STOPPED){
+		freenect_angle = device->getState().getTiltDegs();
+	}*/
+	device->updateState();
+	printf("\r demanded tilt angle: %+4.2f device tilt angle: %+4.2f", freenect_angle, device->getState().getTiltDegs());
+	fflush(stdout);
 
-  // We create a shader with our vertex shader source code and compile it.
-  GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vs, 1, vs_source, NULL);
-  glCompileShader(vs);
+	//bool depth_registered = false;
+	bool rgb_registered = false;
 
-  // We'll attach our two compiled shaders to the OpenGL program.
-  glAttachShader(program, vs);
-  glAttachShader(program, fs);
+	while(!rgb_registered)
+		rgb_registered = device->getRGB(rgb);
 
-  glLinkProgram(program);
+	got_frames = 0;
 
-  // Generate vertex arrays for our program. More explanation on this will come in the future.
-  glGenVertexArrays(1, &vao);
-  glBindVertexArray(vao);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glLoadIdentity();
+	//glViewport(0, (float)HEIGHT/2, (float)WIDTH/2, HEIGHT);
+	glEnable(GL_TEXTURE_2D);
 
-  // We'll specify that we want to use this program that we've attached the shaders to.
-  glUseProgram(program);
+	glBindTexture(GL_TEXTURE_2D, gl_depth_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, 4, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
 
-  // This is our render loop. As long as our window remains open (ESC is not pressed), we'll continue to render things.
-  while(!glfwWindowShouldClose(window))
-  {
-    // Set up our green background color
-    static const GLfloat green[] = { 0.0f, 0.25f, 0.0f, 1.0f };
-    // Clear the entire buffer with our green color (sets the background to be green).
-    glClearBufferfv(GL_COLOR, 0, green);
+	glBegin(GL_TRIANGLE_FAN);
+		glColor4f(255.0f, 255.0f, 255.0f, 255.0f);
+		glTexCoord2f(0, 0); glVertex3f(0,0,0);
+		glTexCoord2f(1, 0); glVertex3f(640,0,0);
+		glTexCoord2f(1, 1); glVertex3f(640,480,0);
+		glTexCoord2f(0, 1); glVertex3f(0,480,0);
+	glEnd();
 
-    // Draw our triangles
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+	glutSwapBuffers();
+}
 
-    // Swap the buffers so that what we drew will appear on the screen.
-    glfwSwapBuffers(window);
-    glfwPollEvents();
-  }
+//show the current kinect depth scene
+void drawDepthScene() {
 
-  // Program clean up when the window gets closed.
-  glDeleteVertexArrays(1, &vao);
-  glDeleteProgram(program);
+	static std::vector<uint8_t> depth(640*480*4);
+
+	device->updateState();
+	printf("\r demanded tilt angle: %+4.2f device tilt angle: %+4.2f", freenect_angle, device->getState().getTiltDegs());
+	fflush(stdout);
+
+	bool depth_registered = false;
+
+	while(!depth_registered)
+		depth_registered = device->getDepth(depth);
+
+	got_frames = 0;
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glLoadIdentity();
+	//glViewport(0, (float)HEIGHT/2, (float)WIDTH/2, HEIGHT);
+	glEnable(GL_TEXTURE_2D);
+
+	glBindTexture(GL_TEXTURE_2D, gl_depth_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, 4, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, &depth[0]);
+
+	glBegin(GL_TRIANGLE_FAN);
+		glColor4f(255.0f, 255.0f, 255.0f, 255.0f);
+		glTexCoord2f(0, 0); glVertex3f(0,0,0);
+		glTexCoord2f(1, 0); glVertex3f(640,0,0);
+		glTexCoord2f(1, 1); glVertex3f(640,480,0);
+		glTexCoord2f(0, 1); glVertex3f(0,480,0);
+	glEnd();
+
+	glutSwapBuffers();
+}
+
+
+void mainDisplay() {
+	glClearColor(0.8, 0.8, 0.8, 0.0);  
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glutSwapBuffers();
+}
+
+void register3DScene() {
+	bool depth_registered = false;
+	bool rgb_registered = false;
+
+	while(!depth_registered)
+		depth_registered = device->getDepthInMM(sceneDepth);
+	while(!rgb_registered)
+		rgb_registered = device->getRGB(sceneRGB);
+
+	printf("\n depth was registered: %d", depth_registered);
+	printf("\n rgb was registered: %d", rgb_registered);
+}
+
+void showAxis() {
+	 //draw axis lines//
+	 
+	 //x-axis - RED
+	 glBegin(GL_LINES);
+	 glColor3f(1.0f,0.0f,0.0f);
+	 glVertex3f(0.0f,0.0f,0.0f);
+	 glVertex3f(100.0f, 0.0f,0.0f);
+	 glEnd();
+
+	 //y-axis - GREEN
+	 glBegin(GL_LINES);
+	 glColor3f(0.0f,1.0f,0.0f);
+ 	 glVertex3f(0.0f, 100.0f,0.0f);
+	 glVertex3f(0.0f,0.0f,0.0f);
+	 glEnd();
+
+	 //z-axis - BLUE
+	 glBegin(GL_LINES);
+	 glColor3f(0.0f,0.0f,1.0f);
+	 glVertex3f(0.0f,0.0f,0.0f);
+	 glVertex3f(0.0f, 0.0f,100.0f);
+	 glEnd();
+
+	 glColor3f(1,1,1);
+
+}
+
+void constructScene() {
+		//displayPolygon();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glLoadIdentity();
+		//glViewport(0, 0, (float)WIDTH, HEIGHT/2);
+
+	    rotateCamera();
+
+    	if(showScene) {
+	    	glBegin(GL_POINTS);
+		  //   for (int i = 0; i < WIDTH*HEIGHT; ++i) {
+				// if(i < 50) {
+				// 	printf("\n color 1: %d \n color 2: %d \n color 3: %d \n", sceneRGB[i*3], sceneRGB[i*3+1], sceneRGB[i*3+2]);
+				// 	printf("\n depth 1: %d \n depth 2: %d \n depth 3: %d \n", sceneDepth[i*3], sceneDepth[i*3+1], sceneDepth[i*3+2]);
+		  //       }
+		  //       glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
+		  //       //glVertex3f((float)sceneDepth[i*3]/255, (float)sceneDepth[i*3+1]/255, (float)sceneDepth[i*3+2]/255);
+		  //       glVertex3f((float)sceneDepth[i*3]/255, (float)sceneDepth[i*3+1]/255, (float)sceneDepth[i*3+2]/255);
+		  //   }
+	  		//glColor3f(0.5, 0.5, 0.5);
+		    for (int i = 0; i < FREENECT_FRAME_PIX; i++) {
+		  	  		glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
+		    		//if((float)sceneDepth[i] != 0 || (float)sceneDepth[i] != 10000)
+		    		float ii = i % FREENECT_FRAME_W;
+		    		float j = floor(i/FREENECT_FRAME_W);
+		    		float z = (float)sceneDepth[i]/10;
+		    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
+		    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
+  	  				glVertex3f(x/10, y/10, z/10);
+			}
+		    glEnd();
+		}else {
+			showAxis();
+		}
+
+	    glutSwapBuffers();
+}
+
+void defaultGL() {
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClearDepth(1.0);
+	glDepthFunc(GL_LESS);
+	glEnable(GL_DEPTH_TEST);
+    glMatrixMode(GL_MODELVIEW);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	//glOrtho (0, 640, 480, 0, 0.0f, 10000);
+	gluPerspective(150.0f, (float)FREENECT_FRAME_W/FREENECT_FRAME_H, 0.1f, 100);
+	glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+	gluLookAt(0,0,0,0,0,1,0,0,0);
+}
+
+void InitGL() {
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	glClearDepth(1.0);
+	glDepthFunc(GL_LESS);
+	glEnable(GL_DEPTH_TEST);
+	//glDisable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glShadeModel(GL_SMOOTH);
+	glGenTextures(1, &gl_depth_tex);
+	glBindTexture(GL_TEXTURE_2D, gl_depth_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glOrtho (0, 640, 480, 0, 0.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+}
+
+void idle() {
+	int currentWindow = glutGetWindow();
+	glutSetWindow(window);
+	glutPostRedisplay();
+	glutSetWindow(subWindow1);
+	glutPostRedisplay();
+	glutSetWindow(subWindow2);
+	glutPostRedisplay();
+	glutSetWindow(subWindow3);
+	glutPostRedisplay();
+	glutSetWindow(currentWindow);
+}
+
+void setUpDisplay(MyFreenectDevice* device){
+	glutInit(&g_argc, g_argv);
+	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
+	glutInitWindowSize(WIDTH, HEIGHT);
+	glutInitWindowPosition(INIT_POS_X, INIT_POS_Y);
+
+	//
+	window = glutCreateWindow("3D Scene");
+		glutDisplayFunc(mainDisplay);
+		//glutDisplayFunc(&DrawGLScene);
+		//glutIdleFunc(&DrawGLScene);
+		glutKeyboardFunc(keyPressed);
+		defaultGL();
+	subWindow1 = glutCreateSubWindow(window, BORDER, BORDER, WIDTH/2-3/2*BORDER, HEIGHT/2-3/2*BORDER);
+		glutDisplayFunc(drawRGBScene);
+		//glutIdleFunc(&DrawGLScene);
+		InitGL();
+	subWindow2 = glutCreateSubWindow(window, WIDTH/2+BORDER/2, BORDER, WIDTH/2-3/2*BORDER, HEIGHT/2-3/2*BORDER);
+		glutDisplayFunc(drawDepthScene);
+		//glutIdleFunc(&DrawGLScene);
+		InitGL();
+	subWindow3 = glutCreateSubWindow(window, BORDER, HEIGHT/2+BORDER/2, WIDTH-2*BORDER, HEIGHT/2-3/2*BORDER);
+		glutDisplayFunc(constructScene);
+		//glutIdleFunc(&constructScene);
+		//InitGL();
+		defaultGL();
+	glutIdleFunc(idle);
+	glutMainLoop();
+}
+//define main function
+int main(int argc, char **argv) {
+	//Get Kinect Device
+	device = &freenect.createDevice<MyFreenectDevice>(0);
+	//Start Kinect Device
+	//device->setTiltDegrees(10);
+	device->startVideo();
+	device->startDepth();
+	
+	//handle Kinect Device Data
+	device->setLed(LED_GREEN);
+	setUpDisplay(device);
+	//cout << "Focal Length: " << reference_distance;
+	//Stop Kinect Device
+	device->stopVideo();
+	device->stopDepth();
+	device->setLed(LED_OFF);
+	return 1;
 }
