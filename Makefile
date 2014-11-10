@@ -1,9 +1,9 @@
 CC = g++
 LD = g++
 LDFLAGS = -L/usr/local/lib/
-CFLAGS=-g -Wall `pkg-config --cflags libfreenect` -lopengl32 -lglut32 -I/usr/local/include/libfreenect -I/usr/local/include/libusb-1.0 
-#12 -lGL -lGLU -lglut
-LIBS = -lfreenect -framework GLUT -framework OpenGL -lglfw3 -lglew  #-lGL -lGLU -lglut 
+CFLAGS=-g -Wall `pkg-config --cflags libfreenect` -lopengl32 -lglut32 -I/usr/local/include/libfreenect -I/usr/local/include/libusb-1.0 -I/usr/local/include/opencv
+#-lGL -lGLU -lglut
+LIBS = -lfreenect -framework GLUT -framework OpenGL -lglfw3 -lglew -lopencv_core -lopencv_highgui -lopencv_flann -lopencv_video -lopencv_imgproc -lopencv_calib3d -lopencv_features2d -lopencv_nonfree
 OBJECTS = mutex.o myfreenectdevice.o main.o
 PROG = 3Dscene
 

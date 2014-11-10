@@ -10,6 +10,12 @@
 #include "defs.h"
 #include "myfreenectdevice.h"
 
+//OpenCV
+#include "opencv2/core/core.hpp"
+#include "opencv2/features2d/features2d.hpp"
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/nonfree/nonfree.hpp"
 
 // OpenGL
 #if defined(__APPLE__)
@@ -22,6 +28,8 @@
 #include <GL/glu.h>
 #endif
 
+
+using namespace cv;
 using namespace std;
 
 // helper methods :)
@@ -39,6 +47,22 @@ void rotateCamera();
 
 
 /*
+ * gluLookAt variables
+ */
+
+static float eyeX = 0.0f;
+static float eyeY = 0.0f;
+static float eyeZ = 0.0f;
+
+// sight vector 
+static float dx = 0.0f;
+static float dy = 0.0f;
+static float dz = 1.0f;
+
+//angle
+static float angle = 0.0f;
+ 
+/*
  * Basic OpenGL and logic variables defined here
  *
  */
@@ -53,10 +77,23 @@ int subWindow2(0);
 int subWindow3(0);
 
 int showScene = 0;
+int registerScene = 0;
 
-std::vector<uint16_t> sceneDepth(640*480*4);
-std::vector<uint8_t> sceneRGB(640*480*4);
+vector<uint16_t> sceneDepth(640*480*4);
+vector<uint8_t> sceneRGB(640*480*4);
 
+
+/*
+ * OpenCV variables
+ */
+static int total_points = 0;
+static Mat prevImage(480, 640, CV_8UC1);
+static int prevReg = 0;
+
+int minHessian = 400;
+SurfFeatureDetector detector( minHessian );
+SurfDescriptorExtractor extractor;
+FlannBasedMatcher matcher;
 /*
  * Libfreenect variables
  */
@@ -66,6 +103,55 @@ double freenect_angle(0);
 freenect_video_format requested_video_format(FREENECT_VIDEO_IR_8BIT);//FREENECT_VIDEO_RGB
 freenect_depth_format requested_depth_format(FREENECT_DEPTH_REGISTERED);
 
+
+/*
+ * TESTING OpenCV: SURF matching
+ */
+void getTransformationMatrix(Mat currImage) {
+	vector<KeyPoint> keypoints_prev_frame, keypoints_curr_frame;
+
+	detector.detect( prevImage, keypoints_prev_frame );
+	detector.detect( currImage, keypoints_curr_frame );
+
+  	Mat descriptors_prev_frame, descriptors_curr_frame;
+
+  	extractor.compute( prevImage, keypoints_prev_frame, descriptors_prev_frame );
+  	extractor.compute( currImage, keypoints_curr_frame, descriptors_curr_frame );
+
+	vector< DMatch > matches;
+  	matcher.match( descriptors_prev_frame, descriptors_curr_frame, matches );
+
+	  double max_dist = 0; double min_dist = 100;
+	  //-- Quick calculation of max and min distances between keypoints
+	  for( int i = 0; i < matches.size(); i++ ) { 
+	  	double dist = matches[i].distance;
+	    if( dist < min_dist ) min_dist = dist;
+	    if( dist > max_dist ) max_dist = dist;
+	  }
+
+	  //-- Draw only "good" matches (i.e. whose distance is less than 3*min_dist )
+	  vector< DMatch > good_matches;
+
+	  for( int i = 0; i < matches.size(); i++ ) { 
+	  	if( matches[i].distance < max(2*min_dist, 0.02) ) { 
+	  		good_matches.push_back( matches[i]);
+	  	}
+	  }
+	  //-- Localize the object
+	  vector<Point2f> prevFrame;
+	  vector<Point2f> currFrame;
+
+	  for( int i = 0; i < good_matches.size(); i++ )
+	  {
+	    //-- Get the keypoints from the good matches
+	    prevFrame.push_back( keypoints_prev_frame[ good_matches[i].queryIdx ].pt );
+	    currFrame.push_back( keypoints_curr_frame[ good_matches[i].trainIdx ].pt );
+	  }
+
+	Mat H = findHomography( prevFrame, currFrame, CV_RANSAC );
+
+	cout << "Transformation Matrix = "<< endl << " "  << H << endl << endl;
+}
 
 /*
  * TESTING OpenGL
@@ -116,6 +202,12 @@ void rotateCamera() {
     glLoadIdentity();
 	gluLookAt(x,0,z,0,0,radius/2,0,-1,0);
 	angle += 0.05;
+}
+
+void changeView() {
+	glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+	gluLookAt(eyeX,eyeY,eyeZ,eyeX + dx,eyeY + dy,eyeZ+dz,0,-1,0);
 }
 
 
@@ -189,7 +281,34 @@ void keyPressed(unsigned char key, int x, int y) {
 
 	if (key == 'v') {
 		register3DScene();
+		registerScene = 1;
 		showScene = 1;
+	}
+	if (key == 'j') {
+		angle -= 0.2f;
+		dx = sin(angle);
+		dz = cos(angle);
+	}
+	if (key == 'J') {
+		eyeX -= dx*.1f;
+		eyeZ -= dz*.1f;
+	}
+	if (key == 'k') {
+		angle += 0.2f;
+		dx = sin(angle);
+		dz = cos(angle);
+	}
+	if (key == 'K') {
+		eyeX += dx*.1f;
+		eyeZ += dz*.1f;
+	}
+	if (key == 'i') {
+		eyeX -= dz*.1f;
+		eyeZ += dx*.1f;
+	}
+	if (key == 'I') {
+		eyeX += dz*.1f;
+		eyeZ -= dx*.1f;
 	}
 
 	device->setTiltDegrees(freenect_angle);
@@ -315,17 +434,19 @@ void showAxis() {
 	 glEnd();
 
 	 glColor3f(1,1,1);
-
 }
 
 // Constructs 3D point cloud scene
 void constructScene() {
+
+		Mat grayScaleImage(480, 640, CV_8UC1);
 		//displayPolygon();
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glLoadIdentity();
 		//glViewport(0, 0, (float)WIDTH, HEIGHT/2);
 
-	    rotateCamera();
+	    //rotateCamera();
+		changeView();
 
     	if(showScene) {
 	    	glBegin(GL_POINTS);
@@ -340,17 +461,32 @@ void constructScene() {
 		  //   }
 	  		//glColor3f(0.5, 0.5, 0.5);
 		    for (int i = 0; i < FREENECT_FRAME_PIX; i++) {
-		  	  		glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
-		    		//if((float)sceneDepth[i] != 0 || (float)sceneDepth[i] != 10000)
+		    		float z = (float)sceneDepth[i]/10;
 		    		float ii = i % FREENECT_FRAME_W;
 		    		float j = floor(i/FREENECT_FRAME_W);
-		    		float z = (float)sceneDepth[i]/10;
-		    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
-		    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
-  	  				glVertex3f(x/20, y/20, z/20);
+		    		grayScaleImage.at<uchar>(j,ii) = (int)(.299*sceneRGB[i*3] + .587*sceneRGB[i*3+1] + .114*sceneRGB[i*3+2]);
+		    		if(z > 0 && z < 1000) {
+			  	  		glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
+			    		//if((float)sceneDepth[i] != 0 || (float)sceneDepth[i] != 10000)
+			    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
+			    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
+	  	  				glVertex3f(x/20, y/20, z/20);
+	  	  			}
 			}
 		    glEnd();
+
+		    if(registerScene) { 
+			    if (prevReg) {
+			    	getTransformationMatrix(grayScaleImage);
+			    	prevReg = 0;
+			    }
+			    prevImage = grayScaleImage;
+			    imshow("Gray Image", grayScaleImage);
+			    registerScene = 0;
+			}
+			prevReg = 1;
 		}else {
+			rotateCamera();
 			showAxis();
 		}
 
@@ -367,14 +503,14 @@ void defaultGL() {
 	glClearDepth(1.0);
 	glDepthFunc(GL_LESS);
 	glEnable(GL_DEPTH_TEST);
-    glMatrixMode(GL_MODELVIEW);
+    //glMatrixMode(GL_MODELVIEW);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	//glOrtho (0, 640, 480, 0, 0.0f, 10000);
 	gluPerspective(150.0f, (float)FREENECT_FRAME_W/FREENECT_FRAME_H, 0.1f, 100);
 	glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-	gluLookAt(0,0,0,0,0,1,0,0,0);
+	gluLookAt(0,0,0,0,0,1,0,-1,0);
 }
 
 /*
@@ -470,7 +606,6 @@ int main(int argc, char **argv) {
 	//device->setTiltDegrees(10);
 	device->startVideo();
 	device->startDepth();
-	
 	//handle Kinect Device Data
 	device->setLed(LED_GREEN);
 	setUpDisplay(device);
