@@ -17,6 +17,13 @@
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/nonfree/nonfree.hpp"
 
+//PCL
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+#include <pcl/registration/icp.h>
+
+//EIGEN
+
 // OpenGL
 #if defined(__APPLE__)
 #include <GLUT/glut.h>
@@ -31,6 +38,7 @@
 
 using namespace cv;
 using namespace std;
+using namespace pcl;
 
 // helper methods :)
 void displayPolygon();
@@ -46,6 +54,16 @@ void drawDepthScene();
 void rotateCamera();
 
 
+/*
+ * PCL variables
+ */
+PointCloud<PointXYZRGB>::Ptr cloud_in (new PointCloud<PointXYZRGB>);
+//pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_out (new pcl::PointCloud<pcl::PointXYZ>);
+
+PointCloud<PointXYZRGB>::Ptr cloud_prev (new PointCloud<PointXYZRGB>);
+PointCloud<PointXYZRGB>::Ptr cloud_final (new PointCloud<PointXYZRGB>);
+
+int number_of_points = 0;
 /*
  * gluLookAt variables
  */
@@ -109,47 +127,44 @@ freenect_depth_format requested_depth_format(FREENECT_DEPTH_REGISTERED);
  */
 void getTransformationMatrix(Mat currImage) {
 	vector<KeyPoint> keypoints_prev_frame, keypoints_curr_frame;
+  	Mat descriptors_prev_frame, descriptors_curr_frame;
+	vector< DMatch > matches;
 
 	detector.detect( prevImage, keypoints_prev_frame );
 	detector.detect( currImage, keypoints_curr_frame );
 
-  	Mat descriptors_prev_frame, descriptors_curr_frame;
-
   	extractor.compute( prevImage, keypoints_prev_frame, descriptors_prev_frame );
   	extractor.compute( currImage, keypoints_curr_frame, descriptors_curr_frame );
 
-	vector< DMatch > matches;
   	matcher.match( descriptors_prev_frame, descriptors_curr_frame, matches );
 
-	  double max_dist = 0; double min_dist = 100;
-	  //-- Quick calculation of max and min distances between keypoints
-	  for( int i = 0; i < matches.size(); i++ ) { 
-	  	double dist = matches[i].distance;
-	    if( dist < min_dist ) min_dist = dist;
-	    if( dist > max_dist ) max_dist = dist;
-	  }
+	double max_dist = 0; double min_dist = 100;
+	//-- Quick calculation of max and min distances between keypoints
+	for( int i = 0; i < matches.size(); i++ ) { 
+		double dist = matches[i].distance;
+		if( dist < min_dist ) min_dist = dist;
+		if( dist > max_dist ) max_dist = dist;
+	}
 
-	  //-- Draw only "good" matches (i.e. whose distance is less than 3*min_dist )
-	  vector< DMatch > good_matches;
+	//-- Draw only "good" matches (i.e. whose distance is less than 3*min_dist )
+	vector< DMatch > good_matches;
 
-	  for( int i = 0; i < matches.size(); i++ ) { 
-	  	if( matches[i].distance < max(2*min_dist, 0.02) ) { 
-	  		good_matches.push_back( matches[i]);
-	  	}
-	  }
-	  //-- Localize the object
-	  vector<Point2f> prevFrame;
-	  vector<Point2f> currFrame;
+	for( int i = 0; i < matches.size(); i++ ) { 
+		if( matches[i].distance < max(2*min_dist, 0.02) ) { 
+			good_matches.push_back( matches[i]);
+		}
+	}
+	//-- Localize the object
+	vector<Point2f> prevFrame;
+	vector<Point2f> currFrame;
 
-	  for( int i = 0; i < good_matches.size(); i++ )
-	  {
-	    //-- Get the keypoints from the good matches
-	    prevFrame.push_back( keypoints_prev_frame[ good_matches[i].queryIdx ].pt );
-	    currFrame.push_back( keypoints_curr_frame[ good_matches[i].trainIdx ].pt );
-	  }
+	for( int i = 0; i < good_matches.size(); i++ ) {
+		//-- Get the keypoints from the good matches
+		prevFrame.push_back( keypoints_prev_frame[ good_matches[i].queryIdx ].pt );
+		currFrame.push_back( keypoints_curr_frame[ good_matches[i].trainIdx ].pt );
+	}
 
 	Mat H = findHomography( prevFrame, currFrame, CV_RANSAC );
-
 	cout << "Transformation Matrix = "<< endl << " "  << H << endl << endl;
 }
 
@@ -209,7 +224,6 @@ void changeView() {
     glLoadIdentity();
 	gluLookAt(eyeX,eyeY,eyeZ,eyeX + dx,eyeY + dy,eyeZ+dz,0,-1,0);
 }
-
 
 /*
  * Define Kinect's keyboard controls
@@ -396,6 +410,7 @@ void drawDepthScene() {
 
 // Registers 3D depth points from the Kinect
 void register3DScene() {
+	IterativeClosestPoint<PointXYZRGB, PointXYZRGB> icp;
 	bool depth_registered = false;
 	bool rgb_registered = false;
 
@@ -404,6 +419,57 @@ void register3DScene() {
 	while(!rgb_registered)
 		rgb_registered = device->getRGB(sceneRGB);
 
+	cloud_in->width    = 640;
+	cloud_in->height   = 480;
+	cloud_in->is_dense = false;
+	cloud_in->points.resize(cloud_in->width * cloud_in->height);
+
+	int cInx = 0;
+	int largestZ = 0;
+	for(size_t i=0; i < FREENECT_FRAME_PIX; i++) {
+    		float z = (float)sceneDepth[i]/10;
+    		float ii = i % FREENECT_FRAME_W;
+    		float j = floor(i/FREENECT_FRAME_W);
+    		if(z > 0 && z < 999) {
+    			largestZ = largestZ < z ? z : largestZ;
+	    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
+	    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
+	    		cloud_in->points[cInx].x = (float)x/50;
+	    		cloud_in->points[cInx].y = (float)y/50;
+	    		cloud_in->points[cInx].z = (float)z/50;
+	    		cloud_in->points[cInx].r = sceneRGB[i*3];
+	    		cloud_in->points[cInx].g = sceneRGB[i*3+1];
+	    		cloud_in->points[cInx].b = sceneRGB[i*3+2];
+	    		cInx++;
+  			}
+	}
+
+	if(cloud_prev->points.size() == 0) {
+		cloud_prev.swap(cloud_in);
+		cloud_final = cloud_prev;
+		number_of_points = cInx;
+	}else {
+		icp.setInputCloud(cloud_in);
+		icp.setInputTarget(cloud_prev);
+
+		// Set the max correspondence distance to 5cm (e.g., correspondences with higher distances will be ignored)
+		icp.setMaxCorrespondenceDistance (200);
+		// Set the maximum number of iterations (criterion 1)
+		icp.setMaximumIterations (20);
+		// Set the transformation epsilon (criterion 2)
+		icp.setTransformationEpsilon (1e-16);
+		// Set the euclidean distance difference epsilon (criterion 3)
+		icp.setEuclideanFitnessEpsilon (.5);
+
+	  	icp.align(*cloud_final);
+	  	number_of_points = cloud_final->points.size();
+
+	  	cout << "\nICP Aligned: " << icp.hasConverged() << endl;
+	  	cout << "ICP Score: " << icp.getFitnessScore() << endl;
+	  	cout << icp.getFinalTransformation() << endl;
+	}
+
+	printf("\n Number of points: %d", cloud_prev->points.size());
 	printf("\n depth was registered: %d", depth_registered);
 	printf("\n rgb was registered: %d", rgb_registered);
 }
@@ -439,7 +505,7 @@ void showAxis() {
 // Constructs 3D point cloud scene
 void constructScene() {
 
-		Mat grayScaleImage(480, 640, CV_8UC1);
+		//Mat grayScaleImage(480, 640, CV_8UC1);
 		//displayPolygon();
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glLoadIdentity();
@@ -450,41 +516,35 @@ void constructScene() {
 
     	if(showScene) {
 	    	glBegin(GL_POINTS);
-		  //   for (int i = 0; i < WIDTH*HEIGHT; ++i) {
-				// if(i < 50) {
-				// 	printf("\n color 1: %d \n color 2: %d \n color 3: %d \n", sceneRGB[i*3], sceneRGB[i*3+1], sceneRGB[i*3+2]);
-				// 	printf("\n depth 1: %d \n depth 2: %d \n depth 3: %d \n", sceneDepth[i*3], sceneDepth[i*3+1], sceneDepth[i*3+2]);
-		  //       }
-		  //       glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
-		  //       //glVertex3f((float)sceneDepth[i*3]/255, (float)sceneDepth[i*3+1]/255, (float)sceneDepth[i*3+2]/255);
-		  //       glVertex3f((float)sceneDepth[i*3]/255, (float)sceneDepth[i*3+1]/255, (float)sceneDepth[i*3+2]/255);
-		  //   }
-	  		//glColor3f(0.5, 0.5, 0.5);
-		    for (int i = 0; i < FREENECT_FRAME_PIX; i++) {
-		    		float z = (float)sceneDepth[i]/10;
-		    		float ii = i % FREENECT_FRAME_W;
-		    		float j = floor(i/FREENECT_FRAME_W);
-		    		grayScaleImage.at<uchar>(j,ii) = (int)(.299*sceneRGB[i*3] + .587*sceneRGB[i*3+1] + .114*sceneRGB[i*3+2]);
-		    		if(z > 0 && z < 1000) {
-			  	  		glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
-			    		//if((float)sceneDepth[i] != 0 || (float)sceneDepth[i] != 10000)
-			    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
-			    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
-	  	  				glVertex3f(x/20, y/20, z/20);
-	  	  			}
+		 //    for (int i = 0; i < FREENECT_FRAME_PIX; i++) {
+		 //    		float z = (float)sceneDepth[i]/10;
+		 //    		float ii = i % FREENECT_FRAME_W;
+		 //    		float j = floor(i/FREENECT_FRAME_W);
+		 //    		grayScaleImage.at<uchar>(j,ii) = (int)(.299*sceneRGB[i*3] + .587*sceneRGB[i*3+1] + .114*sceneRGB[i*3+2]);
+		 //    		if(z > 0 && z < 1000) {
+			//   	  		glColor3f((float)sceneRGB[i*3]/255, (float)sceneRGB[i*3+1]/255, (float)sceneRGB[i*3+2]/255);
+			//     		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
+			//     		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
+	  // 	  				glVertex3f(x/20, y/20, z/20);
+	  // 	  			}
+			// }
+			for (int i = 0; i < number_of_points; i++) {
+				glColor3f((float)cloud_final->points[i].r/255, (float)cloud_final->points[i].g/255, (float)cloud_final->points[i].b/255);
+				//glColor3f(1.0f, 1.0f, 1.0f);
+				glVertex3f(cloud_final->points[i].x, cloud_final->points[i].y, cloud_final->points[i].z);
 			}
 		    glEnd();
 
-		    if(registerScene) { 
-			    if (prevReg) {
-			    	getTransformationMatrix(grayScaleImage);
-			    	prevReg = 0;
-			    }
-			    prevImage = grayScaleImage;
-			    imshow("Gray Image", grayScaleImage);
-			    registerScene = 0;
-			}
-			prevReg = 1;
+		 //    if(registerScene) { 
+			//     if (prevReg) {
+			//     	getTransformationMatrix(grayScaleImage);
+			//     	prevReg = 0;
+			//     }
+			//     prevImage = grayScaleImage;
+			//     imshow("Gray Image", grayScaleImage);
+			//     registerScene = 0;
+			// }
+			// prevReg = 1;
 		}else {
 			rotateCamera();
 			showAxis();
