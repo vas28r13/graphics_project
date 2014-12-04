@@ -1,126 +1,4 @@
-#include <libfreenect.hpp>
-#include <iostream>
-#include <vector>
-#include <cmath>
-#include <math.h>
-#include <pthread.h>
-
-
-//Local headers
-#include "defs.h"
-#include "myfreenectdevice.h"
-
-//OpenCV
-#include "opencv2/core/core.hpp"
-#include "opencv2/features2d/features2d.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
-#include "opencv2/nonfree/nonfree.hpp"
-
-//PCL
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
-#include <pcl/registration/icp.h>
-
-//EIGEN
-
-// OpenGL
-#if defined(__APPLE__)
-#include <GLUT/glut.h>
-#include <OpenGL/gl.h>
-#include <OpenGL/glu.h>
-#else
-#include <GL/glut.h>
-#include <GL/gl.h>
-#include <GL/glu.h>
-#endif
-
-
-using namespace cv;
-using namespace std;
-using namespace pcl;
-
-// helper methods :)
-void displayPolygon();
-void register3DScene();
-void drawRGBScene();
-void idle();
-void InitGL();
-void defaultGL();
-void constructScene();
-void showAxis();
-void mainDisplay();
-void drawDepthScene();
-void rotateCamera();
-
-
-/*
- * PCL variables
- */
-PointCloud<PointXYZRGB>::Ptr cloud_in (new PointCloud<PointXYZRGB>);
-//pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_out (new pcl::PointCloud<pcl::PointXYZ>);
-
-PointCloud<PointXYZRGB>::Ptr cloud_prev (new PointCloud<PointXYZRGB>);
-PointCloud<PointXYZRGB>::Ptr cloud_final (new PointCloud<PointXYZRGB>);
-
-int number_of_points = 0;
-/*
- * gluLookAt variables
- */
-
-static float eyeX = 0.0f;
-static float eyeY = 0.0f;
-static float eyeZ = 0.0f;
-
-// sight vector 
-static float dx = 0.0f;
-static float dy = 0.0f;
-static float dz = 1.0f;
-
-//angle
-static float angle = 0.0f;
- 
-/*
- * Basic OpenGL and logic variables defined here
- *
- */
-GLuint gl_depth_tex;
-GLuint gl_rgb_tex;
-int g_argc;
-char **g_argv;
-int got_frames(0);
-int window(0);
-int subWindow1(0);
-int subWindow2(0);
-int subWindow3(0);
-
-int showScene = 0;
-int registerScene = 0;
-
-vector<uint16_t> sceneDepth(640*480*4);
-vector<uint8_t> sceneRGB(640*480*4);
-
-
-/*
- * OpenCV variables
- */
-static int total_points = 0;
-static Mat prevImage(480, 640, CV_8UC1);
-static int prevReg = 0;
-
-int minHessian = 400;
-SurfFeatureDetector detector( minHessian );
-SurfDescriptorExtractor extractor;
-FlannBasedMatcher matcher;
-/*
- * Libfreenect variables
- */
-Freenect::Freenect freenect;
-MyFreenectDevice* device;
-double freenect_angle(0);
-freenect_video_format requested_video_format(FREENECT_VIDEO_IR_8BIT);//FREENECT_VIDEO_RGB
-freenect_depth_format requested_depth_format(FREENECT_DEPTH_REGISTERED);
-
+#include "main.h"
 
 /*
  * TESTING OpenCV: SURF matching
@@ -174,7 +52,7 @@ void getTransformationMatrix(Mat currImage) {
  */
 void displayPolygon() {
 
-  // Set every pixel in the frame buffer to the current clear color.
+  	// Set every pixel in the frame buffer to the current clear color.
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glLoadIdentity();//load identity matrix
@@ -193,14 +71,16 @@ void displayPolygon() {
       glVertex3f(-1.0f,0.0f,0.0f);//sixth vertex
     glEnd();//end drawing of polygon
 
-    // glBegin(GL_POLYGON);//begin drawing of polygon
-    //   //glVertex3f(-0.5f,0.5f,0.0f);//first vertex
-    //   //glVertex3f(0.5f,0.5f,0.0f);//second vertex
-    //   glVertex3f(320,0,0.0f);//third vertex
-    //   glVertex3f(640,240,0.0f);//fourth vertex
-    //   glVertex3f(320,480,0.0f);//fifth vertex
-    //   glVertex3f(0,240,0.0f);//sixth vertex
-    // glEnd();//end drawing of polygon
+    /*
+    glBegin(GL_POLYGON);//begin drawing of polygon
+      //glVertex3f(-0.5f,0.5f,0.0f);//first vertex
+      //glVertex3f(0.5f,0.5f,0.0f);//second vertex
+      glVertex3f(320,0,0.0f);//third vertex
+      glVertex3f(640,240,0.0f);//fourth vertex
+      glVertex3f(320,480,0.0f);//fifth vertex
+      glVertex3f(0,240,0.0f);//sixth vertex
+    glEnd();//end drawing of polygon
+    */
 	glutSwapBuffers();
 }
 
@@ -233,6 +113,7 @@ void keyPressed(unsigned char key, int x, int y) {
 	if (key == 27) {
 		device->setLed(LED_OFF);
 		freenect_angle = 0;
+		device->setTiltDegrees(freenect_angle);
 		glutDestroyWindow(window);
 	}
 	if (key == '1') {
@@ -248,10 +129,6 @@ void keyPressed(unsigned char key, int x, int y) {
 		device->setLed(LED_BLINK_GREEN);
 	}
 	if (key == '5') {
-		// 5 is the same as 4
-		device->setLed(LED_BLINK_GREEN);
-	}
-	if (key == '6') {
 		device->setLed(LED_BLINK_RED_YELLOW);
 	}
 	if (key == '0') {
@@ -276,23 +153,27 @@ void keyPressed(unsigned char key, int x, int y) {
 		if (freenect_angle > 30) {
 			freenect_angle = 30;
 		}
+		device->setTiltDegrees(freenect_angle);
 	}
 	if (key == 's' || key == 'd') {
 		freenect_angle = 10;
+		device->setTiltDegrees(freenect_angle);
 	}
 	if (key == 'x') {
 		freenect_angle--;
 		if (freenect_angle < -30) {
 			freenect_angle = -30;
 		}
+		device->setTiltDegrees(freenect_angle);
 	}
 	if (key == 'e') {
 		freenect_angle = 10;
+		device->setTiltDegrees(freenect_angle);
 	}
 	if (key == 'c') {
 		freenect_angle = -10;
+		device->setTiltDegrees(freenect_angle);
 	}
-
 	if (key == 'v') {
 		register3DScene();
 		registerScene = 1;
@@ -306,6 +187,16 @@ void keyPressed(unsigned char key, int x, int y) {
 	if (key == 'J') {
 		eyeX -= dx*.1f;
 		eyeZ -= dz*.1f;
+	}
+	if (key == 'n') {
+		angle += 0.2f;
+		dy= sin(angle);
+		dz = cos(angle);
+	}
+	if (key == 'N') {
+		angle -= 0.2f;
+		dy = sin(angle);
+		dz = cos(angle);
 	}
 	if (key == 'k') {
 		angle += 0.2f;
@@ -324,8 +215,14 @@ void keyPressed(unsigned char key, int x, int y) {
 		eyeX += dz*.1f;
 		eyeZ -= dx*.1f;
 	}
-
-	device->setTiltDegrees(freenect_angle);
+	if (key == 'm') {
+		eyeY -= dz*.1f;
+		eyeZ += dy*.1f;
+	}
+	if (key == 'M') {
+		eyeY += dz*.1f;
+		eyeZ -= dy*.1f;
+	}
 }
 
 
@@ -334,13 +231,8 @@ void keyPressed(unsigned char key, int x, int y) {
 void drawRGBScene() {
 	//static std::vector<uint8_t> depth(640*480*4);
 	static std::vector<uint8_t> rgb(640*480*4);
-
-	// using getTiltDegs() in a closed loop is unstable
-	/*if(device->getState().m_code == TILT_STATUS_STOPPED){
-		freenect_angle = device->getState().getTiltDegs();
-	}*/
 	device->updateState();
-	//cout << "Device tilt angle: " << device->getState().getTiltDegs();
+
 	printf("\r demanded tilt angle: %+4.2f device tilt angle: %+4.2f", freenect_angle, device->getState().getTiltDegs());
 	fflush(stdout);
 
@@ -373,7 +265,6 @@ void drawRGBScene() {
 
 //show the current kinect depth scene
 void drawDepthScene() {
-
 	static std::vector<uint8_t> depth(640*480*4);
 
 	device->updateState();
@@ -406,11 +297,217 @@ void drawDepthScene() {
 	glutSwapBuffers();
 }
 
+void setPointCloudColor(PointCloud<PointXYZRGB>::Ptr pc,
+						int r,
+						int g,
+						int b) {
 
+	for(size_t i = 0; i < pc->points.size(); i++) {
+		pc->points[i].r = r;
+		pc->points[i].g = g;
+		pc->points[i].b = b;
+	}	
+
+}
+
+void filterCorrespondences(PointCloud<PointXYZI>::Ptr src_pts,
+                           PointCloud<PointXYZI>::Ptr tar_pts,
+                           vector<int>& src2tar, 
+                           vector<int>& tar2src,
+                           CorrespondencesPtr cors) {
+
+    cout << "Filtering correspondences..." << endl;
+    vector<pair<unsigned, unsigned> > correspondences;
+    for (unsigned cIdx = 0; cIdx < src2tar.size(); ++cIdx) {
+        if (tar2src[src2tar[cIdx]] == cIdx) {
+            correspondences.push_back(make_pair(cIdx, src2tar[cIdx]));
+        }
+    }
+
+    cors->resize(correspondences.size());
+    for (unsigned cIdx = 0; cIdx < correspondences.size(); ++cIdx) {
+        (*cors)[cIdx].index_query = correspondences[cIdx].first;
+        (*cors)[cIdx].index_match = correspondences[cIdx].second;
+    }
+
+    pcl::registration::CorrespondenceRejectorSampleConsensus<PointXYZI> rejector;
+    rejector.setInputCloud(src_pts);
+    rejector.setTargetCloud(tar_pts);
+    rejector.setMaxIterations(200);
+    rejector.setInlierThreshold(.05);
+    rejector.setInputCorrespondences(cors);
+    rejector.getCorrespondences(*cors);
+    
+    cout << "Correspondences filtered: " << correspondences.size() << endl;
+}
+
+void filterPointCloud(PointCloud<PointXYZRGB>::Ptr in_cloud, float leaf_size,
+            		  PointCloud<PointXYZRGB>::Ptr out_cloud) {
+
+	cout << "\nBegin downsampling point-cloud..." << endl;
+	cout << "Initial point count: " << in_cloud->points.size() << endl;
+
+	VoxelGrid<PointXYZRGB> voxel_grid;
+	voxel_grid.setLeafSize(leaf_size, leaf_size, leaf_size);
+	voxel_grid.setInputCloud(in_cloud);
+	voxel_grid.filter(*out_cloud);
+	
+	cout << "\nFinished downsampling point-cloud !" << endl;
+	cout << "Filtered point cloud: " << out_cloud->points.size() << endl;
+}
+
+Matrix4f transformationEstimation(PointCloud<PointXYZI>::Ptr src_pts,
+       						      PointCloud<PointXYZI>::Ptr tar_pts,
+        						  CorrespondencesPtr cors) {
+
+	cout << "Begin transformation estimation" << endl;
+
+    Matrix4f transformationMtx = Matrix4f::Identity();
+    pcl::registration::TransformationEstimation<PointXYZI, PointXYZI>::Ptr transformation_estimation (new pcl::registration::TransformationEstimationSVD<PointXYZI, PointXYZI>);
+    transformation_estimation->estimateRigidTransformation(*src_pts, *tar_pts, *cors, transformationMtx);
+    
+	cout << "Transformation:\n" << transformationMtx << endl;    
+    return transformationMtx;
+}
+
+Matrix4f RANSACalign(PointCloud<PointXYZI>::Ptr src_cloud,
+				     PointCloud<PointXYZI>::Ptr tar_cloud,
+				 	 PointCloud<FPFHSignature33>::Ptr src_desc, 
+				 	 PointCloud<FPFHSignature33>::Ptr tar_desc) {
+
+    PointCloud<PointXYZI>::Ptr src2tar (new PointCloud<PointXYZI>);
+    time_t start;
+    time_t end;
+    
+    //start the timer
+    time(&start);
+
+	SampleConsensusInitialAlignment<PointXYZI, PointXYZI, FPFHSignature33> reg;
+	reg.setMinSampleDistance(SAC_MIN_SAMPLE);
+	reg.setMaxCorrespondenceDistance(SAC_MAX_COR_DIST);
+	reg.setMaximumIterations(SAC_MAX_ITER);
+	reg.setNumberOfSamples(3);
+
+	reg.setInputCloud(src_cloud);
+	reg.setInputTarget(tar_cloud);
+	reg.setSourceFeatures(src_desc);
+	reg.setTargetFeatures(tar_desc);
+
+	reg.align(*src2tar);
+
+  	//stop the timer
+  	time(&end);
+	double secs = difftime(end, start);
+	cout << "\nRANSAC alignment took: " << secs << " secs" << endl;
+
+	cout << "Has converged:" << reg.hasConverged() << endl;
+	cout << "Fitness Score: " << reg.getFitnessScore() << endl;
+	cout << "Transformation:\n" << reg.getFinalTransformation() << endl;
+	cout << "RANSAC Finished";
+
+	return reg.getFinalTransformation();
+}
+
+Matrix4f ICPalign(PointCloud<PointXYZRGB>::Ptr src_cloud, 
+				  PointCloud<PointXYZRGB>::Ptr tar_cloud,
+				  PointCloud<PointXYZRGB>::Ptr src2tar,
+				  Matrix4f guess) {
+
+	//PointCloud<PointXYZRGB>::Ptr src2tar (new PointCloud<PointXYZRGB>);
+    time_t start;
+    time_t end;
+    
+    //start the timer
+    time(&start);
+
+	IterativeClosestPoint<PointXYZRGB, PointXYZRGB> icp;
+	icp.setInputCloud(src_cloud);
+	icp.setInputTarget(tar_cloud);
+
+	// Set the max correspondence distance - correspondences with higher distances will be ignored
+	icp.setMaxCorrespondenceDistance(0.5f);
+	// Set the maximum number of iterations
+	icp.setMaximumIterations(300);
+	// Set the transformation epsilon
+	icp.setTransformationEpsilon(1e-8);
+	// Set the euclidean distance difference epsilon
+	icp.setEuclideanFitnessEpsilon(0.0001f);
+ 	//icp.setRANSACOutlierRejectionThreshold(0.001);
+
+  	icp.align(*src2tar, guess);
+
+  	//stop the timer
+  	time(&end);
+	double secs = difftime(end, start);
+	cout << "\nICP registration took: " << secs << " secs" << endl; 
+
+  	cout << "ICP Aligned: " << icp.hasConverged() << endl;
+  	cout << "ICP Score: " << icp.getFitnessScore() << endl;
+  	cout << icp.getFinalTransformation() << endl;
+
+	return icp.getFinalTransformation();
+}
+
+void getInterestPoints(PointCloud<PointXYZRGB>::Ptr input_cloud, PointCloud<PointXYZI>::Ptr interest_points) {
+
+    SIFTKeypoint<PointXYZRGB, PointXYZI>* sift3D = new SIFTKeypoint<PointXYZRGB, PointXYZI>;
+    pcl::search::KdTree<PointXYZRGB>::Ptr treeKD (new pcl::search::KdTree<PointXYZRGB>());
+
+    cout << "Computing SIFT points..." << endl;
+    sift3D->setScales(SIFT_SCALE, 6, 10);
+    sift3D->setMinimumContrast(0.5f);
+    sift3D->setSearchMethod(treeKD);
+    sift3D->setInputCloud(input_cloud);
+    sift3D->compute(*interest_points);
+    cout << "SIFT points computed: " << interest_points->points.size() << endl;
+}
+
+void getPointDescriptors(PointCloud<PointXYZI>::Ptr interest_points, PointCloud<FPFHSignature33>::Ptr feature_descriptors) {
+	cout << "Obtaining descriptors for interest points..." << endl;
+	//Set
+    PointCloud<PointXYZRGB>::Ptr ipts (new PointCloud<PointXYZRGB>);
+	copyPointCloud(*interest_points, *ipts);
+
+	FPFHEstimationOMP<PointXYZRGB, Normal, FPFHSignature33>::Ptr fpfh (new FPFHEstimationOMP<PointXYZRGB, Normal, FPFHSignature33>);
+    //FPFHEstimation<PointXYZRGB, Normal, FPFHSignature33>::Ptr fpfh;
+    fpfh->setSearchMethod(pcl::search::Search<PointXYZRGB>::Ptr (new pcl::search::KdTree<PointXYZRGB>));
+    fpfh->setRadiusSearch(FEATURE_RADIUS);
+    fpfh->setInputCloud(ipts);
+
+	PointCloud<Normal>::Ptr normals (new PointCloud<Normal>);
+    NormalEstimation<PointXYZRGB, Normal> norm_est;
+    norm_est.setSearchMethod(pcl::search::Search<PointXYZRGB>::Ptr (new pcl::search::KdTree<PointXYZRGB>));
+    norm_est.setRadiusSearch(NORMAL_RADIUS);
+    norm_est.setInputCloud(ipts);
+    norm_est.compute(*normals);
+
+    fpfh->setInputNormals(normals);
+    fpfh->compute(*feature_descriptors);
+
+    cout << "Feature descriptors obtained: " << feature_descriptors->points.size() << endl;
+}
+
+void getCorrespondance(PointCloud<FPFHSignature33>::Ptr src, PointCloud<FPFHSignature33>::Ptr tar, vector<int>& correspondences) {
+	cout << "Iterating through descriptors and finding correspondences" << endl;
+	correspondences.resize(src->size());
+
+	KdTreeFLANN<FPFHSignature33> descriptor_kdtree;
+    descriptor_kdtree.setInputCloud(tar);
+
+    // Find the index of the best match for each keypoint, and store it in "correspondences_out"
+    const int k = 1;
+    vector<int> k_indices(k);
+    vector<float> k_squared_distances(k);
+    for (size_t i = 0; i < src->size(); i++) {
+        descriptor_kdtree.nearestKSearch (*src, i, k, k_indices, k_squared_distances);
+        correspondences[i] = k_indices[0];
+    }
+    cout << "Feature Correspondences found: " << correspondences.size() << endl;
+}
 
 // Registers 3D depth points from the Kinect
 void register3DScene() {
-	IterativeClosestPoint<PointXYZRGB, PointXYZRGB> icp;
+	PointCloud<PointXYZRGB>::Ptr cloud_in (new PointCloud<PointXYZRGB>);
 	bool depth_registered = false;
 	bool rgb_registered = false;
 
@@ -430,13 +527,14 @@ void register3DScene() {
     		float z = (float)sceneDepth[i]/10;
     		float ii = i % FREENECT_FRAME_W;
     		float j = floor(i/FREENECT_FRAME_W);
-    		if(z > 0 && z < 999) {
-    			largestZ = largestZ < z ? z : largestZ;
+    		// range of points in the point cloud
+    		if(z > 0 && z < MAX_Z) {
+    			largestZ = z > largestZ ? z : largestZ;
 	    		float x = (ii - FREENECT_FRAME_W/2) * (z - 10) * .0021;
 	    		float y = (j - FREENECT_FRAME_H/2) * (z - 10) * .0021;
-	    		cloud_in->points[cInx].x = (float)x/50;
-	    		cloud_in->points[cInx].y = (float)y/50;
-	    		cloud_in->points[cInx].z = (float)z/50;
+	    		cloud_in->points[cInx].x = (float)x/100;
+	    		cloud_in->points[cInx].y = (float)y/100;
+	    		cloud_in->points[cInx].z = (float)z/100;
 	    		cloud_in->points[cInx].r = sceneRGB[i*3];
 	    		cloud_in->points[cInx].g = sceneRGB[i*3+1];
 	    		cloud_in->points[cInx].b = sceneRGB[i*3+2];
@@ -445,31 +543,65 @@ void register3DScene() {
 	}
 
 	if(cloud_prev->points.size() == 0) {
-		cloud_prev.swap(cloud_in);
-		cloud_final = cloud_prev;
-		number_of_points = cInx;
+    	filterPointCloud(cloud_in, LEAF_SIZE, cloud_prev);
+		//*cloud_final = *cloud_prev;
+		copyPointCloud(*cloud_prev, *cloud_final);
+		number_of_points = cloud_final->points.size();
 	}else {
-		icp.setInputCloud(cloud_in);
-		icp.setInputTarget(cloud_prev);
+		//ICPalign(cloud_in, cloud_prev, cloud_final);
+ 	 	PointCloud<PointXYZI>::Ptr src_ipts       (new PointCloud<PointXYZI>);
+    	PointCloud<PointXYZI>::Ptr tar_ipts       (new PointCloud<PointXYZI>);
+    	PointCloud<FPFHSignature33>::Ptr src_desc (new PointCloud<FPFHSignature33>);
+    	PointCloud<FPFHSignature33>::Ptr tar_desc (new PointCloud<FPFHSignature33>);
 
-		// Set the max correspondence distance to 5cm (e.g., correspondences with higher distances will be ignored)
-		icp.setMaxCorrespondenceDistance (200);
-		// Set the maximum number of iterations (criterion 1)
-		icp.setMaximumIterations (20);
-		// Set the transformation epsilon (criterion 2)
-		icp.setTransformationEpsilon (1e-16);
-		// Set the euclidean distance difference epsilon (criterion 3)
-		icp.setEuclideanFitnessEpsilon (.5);
+ 	 	PointCloud<PointXYZRGB>::Ptr cloud_in_filtered  (new PointCloud<PointXYZRGB>);
+		PointCloud<PointXYZRGB>::Ptr registered  (new PointCloud<PointXYZRGB>);
 
-	  	icp.align(*cloud_final);
-	  	number_of_points = cloud_final->points.size();
+ 	 	PointCloud<PointXYZRGB>::Ptr cloud_trans  (new PointCloud<PointXYZRGB>);
+		PointCloud<PointXYZRGB>::Ptr cloud_trans_final  (new PointCloud<PointXYZRGB>);
 
-	  	cout << "\nICP Aligned: " << icp.hasConverged() << endl;
-	  	cout << "ICP Score: " << icp.getFitnessScore() << endl;
-	  	cout << icp.getFinalTransformation() << endl;
+		cout << "Leaf size is: " << LEAF_SIZE << endl;
+
+		filterPointCloud(cloud_in, LEAF_SIZE, cloud_in_filtered);
+
+		//Get interest points
+    	getInterestPoints(cloud_in_filtered, src_ipts);
+    	getInterestPoints(cloud_prev, tar_ipts);
+		//copyPointCloud(*cloud_in_filtered, *src_ipts);
+		//copyPointCloud(*cloud_prev, *tar_ipts);
+
+    	//Get descriptors for interest points
+    	getPointDescriptors(src_ipts, src_desc);
+    	getPointDescriptors(tar_ipts, tar_desc);
+
+	    //Find Correspondences
+	    //vector<int> src2tar;
+	    //vector<int> tar2src;
+	    //getCorrespondance(src_desc, tar_desc, src2tar);
+	    //getCorrespondance(tar_desc, src_desc, tar2src);
+
+	    //Filter Correnspondences
+	    //CorrespondencesPtr cors (new Correspondences);
+	    //filterCorrespondences(src_ipts, tar_ipts, src2tar, tar2src, cors);
+
+	    //Initial transformation
+	    //Matrix4f Ti = transformationEstimation(src_ipts, tar_ipts, cors);
+    	Matrix4f Ti = RANSACalign(src_ipts, tar_ipts, src_desc, tar_desc);
+
+    	//pcl::transformPointCloud(*cloud_in_filtered, *cloud_trans, Ti);
+    	cout << "Initial transformation complete!" << endl;
+ 	 	//cout << "Transformed cloud has: " << cloud_trans->points.size() << " points" << endl;
+    	
+    	//filterPointCloud(cloud_trans, 0.005, filtered_cloud_trans);
+		Matrix4f FTi = ICPalign(cloud_in_filtered, cloud_prev, registered, Ti);
+    	//pcl::transformPointCloud(*cloud_in_filtered, *cloud_trans_final, FTi);
+		//setPointCloudColor(cloud_trans, 255, 0, 0);
+    	*cloud_final += *registered;
+    	number_of_points = cloud_final->points.size();
+		copyPointCloud(*cloud_final, *cloud_prev);
 	}
 
-	printf("\n Number of points: %d", cloud_prev->points.size());
+	printf("\n Number of points: %d", number_of_points);
 	printf("\n depth was registered: %d", depth_registered);
 	printf("\n rgb was registered: %d", rgb_registered);
 }
@@ -631,23 +763,26 @@ void setUpDisplay(MyFreenectDevice* device){
 	glutInitWindowSize(WIDTH, HEIGHT);
 	glutInitWindowPosition(INIT_POS_X, INIT_POS_Y);
 
-	//
+	//Create the UI layout
 	window = glutCreateWindow("Kinect 3D Scene");
 		glutDisplayFunc(mainDisplay);
+		glutKeyboardFunc(keyPressed);
 		//glutDisplayFunc(&DrawGLScene);
 		//glutIdleFunc(&DrawGLScene);
-		glutKeyboardFunc(keyPressed);
 		defaultGL();
 	subWindow1 = glutCreateSubWindow(window, BORDER, BORDER, WIDTH/2-3/2*BORDER, HEIGHT/2-3/2*BORDER);
 		glutDisplayFunc(drawRGBScene);
+		glutKeyboardFunc(keyPressed);
 		//glutIdleFunc(&DrawGLScene);
 		InitGL();
 	subWindow2 = glutCreateSubWindow(window, WIDTH/2+BORDER/2, BORDER, WIDTH/2-3/2*BORDER, HEIGHT/2-3/2*BORDER);
 		glutDisplayFunc(drawDepthScene);
+		glutKeyboardFunc(keyPressed);
 		//glutIdleFunc(&DrawGLScene);
 		InitGL();
 	subWindow3 = glutCreateSubWindow(window, BORDER, HEIGHT/2+BORDER/2, WIDTH-2*BORDER, HEIGHT/2-3/2*BORDER);
 		glutDisplayFunc(constructScene);
+		glutKeyboardFunc(keyPressed);
 		//glutIdleFunc(&constructScene);
 		//InitGL();
 		defaultGL();
@@ -670,7 +805,6 @@ int main(int argc, char **argv) {
 	device->setLed(LED_GREEN);
 	setUpDisplay(device);
 	//cout << "Focal Length: " << reference_distance;
-
 
 	//Stop Kinect Device
 	device->stopVideo();
