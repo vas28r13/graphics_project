@@ -2,4 +2,8 @@
 
 *.o
 
+test_pcd.pcd
+
+point_clouds/*
+
 3Dscene

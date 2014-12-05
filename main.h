@@ -79,15 +79,17 @@ PointCloud<PointXYZRGB>::Ptr cloud_final (new PointCloud<PointXYZRGB>);
 
 int number_of_points   = 0;
 
-int MAX_Z              = 200; // in MM
+int MAX_Z              = 500; // in CM
 
-float SIFT_SCALE       = 0.010f;
-float LEAF_SIZE        = 0.001f;
-float NORMAL_RADIUS    = 0.05f; //0.05
-float FEATURE_RADIUS   = 0.25f; //0.15
-float SAC_MAX_COR_DIST = 0.01; //.01
-float SAC_MIN_SAMPLE   = 0.25f; //.25
-int SAC_MAX_ITER       = 300;
+float SIFT_SCALE       = 0.005f;
+float LEAF_SIZE        = 0.01f; //0.001
+float NORMAL_RADIUS    = 0.03f; //0.05
+float FEATURE_RADIUS   = 0.08f; //0.15   /0.25
+float SAC_MAX_COR_DIST = 0.001f; //.01   /0.0001
+float SAC_MIN_SAMPLE   = 0.15f; //.25
+int SAC_MAX_ITER       = 1000;
+
+Matrix4f T_matrix = Matrix4f::Identity();
 
 /*
  * gluLookAt variables
@@ -144,3 +146,21 @@ MyFreenectDevice* device;
 double freenect_angle(0);
 freenect_video_format requested_video_format(FREENECT_VIDEO_IR_8BIT);//FREENECT_VIDEO_RGB
 freenect_depth_format requested_depth_format(FREENECT_DEPTH_REGISTERED);
+
+void
+loadPCD_() {
+	string pcd_dir;
+	cout << "\nPlease input pcd directory and file: " << endl;
+	cin  >> pcd_dir;
+	cout << "Loading cloud_final!" << endl;
+	pcl::io::loadPCDFile<PointXYZRGB>(pcd_dir, *cloud_final);
+}
+
+void
+savePCD_() {
+	string pcd_dir;
+	cout << "\nPlease input pcd directory and name to save to: " << endl;
+	cin >> pcd_dir;
+	cout << "Saving cloud_final!" << endl;
+	pcl::io::savePCDFile(pcd_dir, *cloud_final);
+}

@@ -155,9 +155,11 @@ void keyPressed(unsigned char key, int x, int y) {
 		}
 		device->setTiltDegrees(freenect_angle);
 	}
-	if (key == 's' || key == 'd') {
-		freenect_angle = 10;
-		device->setTiltDegrees(freenect_angle);
+	if (key == 'S') {
+		savePCD_();
+	}
+	if (key =='L') {
+		loadPCD_();
 	}
 	if (key == 'x') {
 		freenect_angle--;
@@ -180,44 +182,44 @@ void keyPressed(unsigned char key, int x, int y) {
 		showScene = 1;
 	}
 	if (key == 'j') {
-		angle -= 0.2f;
+		angle -= 0.1f;
 		dx = sin(angle);
 		dz = cos(angle);
 	}
 	if (key == 'J') {
-		eyeX -= dx*.1f;
-		eyeZ -= dz*.1f;
+		eyeX -= dx*.05f;
+		eyeZ -= dz*.05f;
 	}
 	if (key == 'n') {
-		angle += 0.2f;
+		angle += 0.1f;
 		dy= sin(angle);
 		dz = cos(angle);
 	}
 	if (key == 'N') {
-		angle -= 0.2f;
+		angle -= 0.1f;
 		dy = sin(angle);
 		dz = cos(angle);
 	}
 	if (key == 'k') {
-		angle += 0.2f;
+		angle += 0.1f;
 		dx = sin(angle);
 		dz = cos(angle);
 	}
 	if (key == 'K') {
-		eyeX += dx*.1f;
-		eyeZ += dz*.1f;
+		eyeX += dx*.05f;
+		eyeZ += dz*.05f;
 	}
 	if (key == 'i') {
-		eyeX -= dz*.1f;
-		eyeZ += dx*.1f;
+		eyeX -= dz*.05f;
+		eyeZ += dx*.05f;
 	}
 	if (key == 'I') {
-		eyeX += dz*.1f;
-		eyeZ -= dx*.1f;
+		eyeX += dz*.05f;
+		eyeZ -= dx*.05f;
 	}
 	if (key == 'm') {
-		eyeY -= dz*.1f;
-		eyeZ += dy*.1f;
+		eyeY -= dz*.05f;
+		eyeZ += dy*.05f;
 	}
 	if (key == 'M') {
 		eyeY += dz*.1f;
@@ -310,6 +312,9 @@ void setPointCloudColor(PointCloud<PointXYZRGB>::Ptr pc,
 
 }
 
+/*
+ * Doesn't work very well... :(
+ */
 void filterCorrespondences(PointCloud<PointXYZI>::Ptr src_pts,
                            PointCloud<PointXYZI>::Ptr tar_pts,
                            vector<int>& src2tar, 
@@ -370,6 +375,44 @@ Matrix4f transformationEstimation(PointCloud<PointXYZI>::Ptr src_pts,
     return transformationMtx;
 }
 
+Matrix4f RANSACRGBalign(PointCloud<PointXYZRGB>::Ptr src_cloud,
+				     PointCloud<PointXYZRGB>::Ptr tar_cloud,
+				 	 PointCloud<FPFHSignature33>::Ptr src_desc, 
+				 	 PointCloud<FPFHSignature33>::Ptr tar_desc) {
+
+    PointCloud<PointXYZRGB>::Ptr src2tar (new PointCloud<PointXYZRGB>);
+    time_t start;
+    time_t end;
+    
+    //start the timer
+    time(&start);
+
+	SampleConsensusInitialAlignment<PointXYZRGB, PointXYZRGB, FPFHSignature33> reg;
+	reg.setMinSampleDistance(SAC_MIN_SAMPLE);
+	reg.setMaxCorrespondenceDistance(SAC_MAX_COR_DIST);
+	reg.setMaximumIterations(SAC_MAX_ITER);
+	reg.setNumberOfSamples(3);
+
+	reg.setInputCloud(src_cloud);
+	reg.setInputTarget(tar_cloud);
+	reg.setSourceFeatures(src_desc);
+	reg.setTargetFeatures(tar_desc);
+
+	reg.align(*src2tar);
+
+  	//stop the timer
+  	time(&end);
+	double secs = difftime(end, start);
+	cout << "\nRANSAC alignment took: " << secs << " secs" << endl;
+
+	cout << "Has converged:" << reg.hasConverged() << endl;
+	cout << "Fitness Score: " << reg.getFitnessScore() << endl;
+	cout << "Transformation:\n" << reg.getFinalTransformation() << endl;
+	cout << "RANSAC Finished";
+
+	return reg.getFinalTransformation();
+}
+
 Matrix4f RANSACalign(PointCloud<PointXYZI>::Ptr src_cloud,
 				     PointCloud<PointXYZI>::Ptr tar_cloud,
 				 	 PointCloud<FPFHSignature33>::Ptr src_desc, 
@@ -425,7 +468,7 @@ Matrix4f ICPalign(PointCloud<PointXYZRGB>::Ptr src_cloud,
 	icp.setInputTarget(tar_cloud);
 
 	// Set the max correspondence distance - correspondences with higher distances will be ignored
-	icp.setMaxCorrespondenceDistance(0.5f);
+	icp.setMaxCorrespondenceDistance(0.0001f);
 	// Set the maximum number of iterations
 	icp.setMaximumIterations(300);
 	// Set the transformation epsilon
@@ -461,6 +504,28 @@ void getInterestPoints(PointCloud<PointXYZRGB>::Ptr input_cloud, PointCloud<Poin
     sift3D->compute(*interest_points);
     cout << "SIFT points computed: " << interest_points->points.size() << endl;
 }
+
+void getRGBPointDescriptors(PointCloud<PointXYZRGB>::Ptr ipts, PointCloud<FPFHSignature33>::Ptr feature_descriptors) {
+	cout << "Obtaining descriptors for interest points..." << endl;
+	//Set
+	FPFHEstimationOMP<PointXYZRGB, Normal, FPFHSignature33>::Ptr fpfh (new FPFHEstimationOMP<PointXYZRGB, Normal, FPFHSignature33>);
+    fpfh->setSearchMethod(pcl::search::Search<PointXYZRGB>::Ptr (new pcl::search::KdTree<PointXYZRGB>));
+    fpfh->setRadiusSearch(FEATURE_RADIUS);
+    fpfh->setInputCloud(ipts);
+
+	PointCloud<Normal>::Ptr normals (new PointCloud<Normal>);
+    NormalEstimation<PointXYZRGB, Normal> normal_estimation;
+    normal_estimation.setSearchMethod(pcl::search::Search<PointXYZRGB>::Ptr (new pcl::search::KdTree<PointXYZRGB>));
+    normal_estimation.setRadiusSearch(NORMAL_RADIUS);
+    normal_estimation.setInputCloud(ipts);
+    normal_estimation.compute(*normals);
+
+    fpfh->setInputNormals(normals);
+    fpfh->compute(*feature_descriptors);
+
+    cout << "Feature descriptors obtained: " << feature_descriptors->points.size() << endl;
+}
+
 
 void getPointDescriptors(PointCloud<PointXYZI>::Ptr interest_points, PointCloud<FPFHSignature33>::Ptr feature_descriptors) {
 	cout << "Obtaining descriptors for interest points..." << endl;
@@ -559,6 +624,7 @@ void register3DScene() {
 
  	 	PointCloud<PointXYZRGB>::Ptr cloud_trans  (new PointCloud<PointXYZRGB>);
 		PointCloud<PointXYZRGB>::Ptr cloud_trans_final  (new PointCloud<PointXYZRGB>);
+		PointCloud<PointXYZRGB>::Ptr cloud_final_filtered  (new PointCloud<PointXYZRGB>);
 
 		cout << "Leaf size is: " << LEAF_SIZE << endl;
 
@@ -569,6 +635,9 @@ void register3DScene() {
     	getInterestPoints(cloud_prev, tar_ipts);
 		//copyPointCloud(*cloud_in_filtered, *src_ipts);
 		//copyPointCloud(*cloud_prev, *tar_ipts);
+
+		//getRGBPointDescriptors(cloud_in_filtered, src_desc);
+		//getRGBPointDescriptors(cloud_prev, tar_desc);
 
     	//Get descriptors for interest points
     	getPointDescriptors(src_ipts, src_desc);
@@ -586,19 +655,25 @@ void register3DScene() {
 
 	    //Initial transformation
 	    //Matrix4f Ti = transformationEstimation(src_ipts, tar_ipts, cors);
+	    //Matrix4f Ti = RANSACRGBalign(cloud_in_filtered, cloud_prev, src_desc, tar_desc);
     	Matrix4f Ti = RANSACalign(src_ipts, tar_ipts, src_desc, tar_desc);
+    	T_matrix = T_matrix * Ti;
 
-    	//pcl::transformPointCloud(*cloud_in_filtered, *cloud_trans, Ti);
+    	pcl::transformPointCloud(*cloud_in_filtered, *cloud_trans, T_matrix);
     	cout << "Initial transformation complete!" << endl;
  	 	//cout << "Transformed cloud has: " << cloud_trans->points.size() << " points" << endl;
     	
     	//filterPointCloud(cloud_trans, 0.005, filtered_cloud_trans);
-		Matrix4f FTi = ICPalign(cloud_in_filtered, cloud_prev, registered, Ti);
+		//Matrix4f FTi = ICPalign(cloud_in_filtered, cloud_prev, registered, Ti);
     	//pcl::transformPointCloud(*cloud_in_filtered, *cloud_trans_final, FTi);
+    	//T_matrix = T_matrix * FTi;
 		//setPointCloudColor(cloud_trans, 255, 0, 0);
-    	*cloud_final += *registered;
+    	*cloud_final += *cloud_trans;
+
+    	filterPointCloud(cloud_final, 0.005, cloud_final_filtered);
+		copyPointCloud(*cloud_final_filtered, *cloud_final);
     	number_of_points = cloud_final->points.size();
-		copyPointCloud(*cloud_final, *cloud_prev);
+		copyPointCloud(*cloud_in_filtered, *cloud_prev);
 	}
 
 	printf("\n Number of points: %d", number_of_points);
@@ -660,7 +735,7 @@ void constructScene() {
 	  // 	  				glVertex3f(x/20, y/20, z/20);
 	  // 	  			}
 			// }
-			for (int i = 0; i < number_of_points; i++) {
+			for (int i = 0; i < cloud_final->points.size(); i++) {
 				glColor3f((float)cloud_final->points[i].r/255, (float)cloud_final->points[i].g/255, (float)cloud_final->points[i].b/255);
 				//glColor3f(1.0f, 1.0f, 1.0f);
 				glVertex3f(cloud_final->points[i].x, cloud_final->points[i].y, cloud_final->points[i].z);
