@@ -54,6 +54,10 @@ using namespace pcl;
 using namespace Eigen;
 
 // helper methods :)
+void setPointCloudColor(PointCloud<PointXYZRGB>::Ptr pc,
+						int r,
+						int g,
+						int b);
 void displayPolygon();
 void register3DScene();
 void drawRGBScene();

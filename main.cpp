@@ -161,6 +161,9 @@ void keyPressed(unsigned char key, int x, int y) {
 	if (key =='L') {
 		loadPCD_();
 	}
+	if (key == 'C') {
+		setPointCloudColor(cloud_final, 255, 0, 0);
+	} 
 	if (key == 'x') {
 		freenect_angle--;
 		if (freenect_angle < -30) {
@@ -308,8 +311,7 @@ void setPointCloudColor(PointCloud<PointXYZRGB>::Ptr pc,
 		pc->points[i].r = r;
 		pc->points[i].g = g;
 		pc->points[i].b = b;
-	}	
-
+	}
 }
 
 /*
@@ -321,7 +323,7 @@ void filterCorrespondences(PointCloud<PointXYZI>::Ptr src_pts,
                            vector<int>& tar2src,
                            CorrespondencesPtr cors) {
 
-    cout << "Filtering correspondences..." << endl;
+    cout << "Begin evaluating and filtering correspondences.." << endl;
     vector<pair<unsigned, unsigned> > correspondences;
     for (unsigned cIdx = 0; cIdx < src2tar.size(); ++cIdx) {
         if (tar2src[src2tar[cIdx]] == cIdx) {
@@ -338,15 +340,16 @@ void filterCorrespondences(PointCloud<PointXYZI>::Ptr src_pts,
     pcl::registration::CorrespondenceRejectorSampleConsensus<PointXYZI> rejector;
     rejector.setInputCloud(src_pts);
     rejector.setTargetCloud(tar_pts);
-    rejector.setMaxIterations(200);
-    rejector.setInlierThreshold(.05);
+    rejector.setMaxIterations(500);
+    rejector.setInlierThreshold(0.1f);
     rejector.setInputCorrespondences(cors);
     rejector.getCorrespondences(*cors);
     
     cout << "Correspondences filtered: " << correspondences.size() << endl;
 }
 
-void filterPointCloud(PointCloud<PointXYZRGB>::Ptr in_cloud, float leaf_size,
+void filterPointCloud(PointCloud<PointXYZRGB>::Ptr in_cloud, 
+					  float leaf_size,
             		  PointCloud<PointXYZRGB>::Ptr out_cloud) {
 
 	cout << "\nBegin downsampling point-cloud..." << endl;
@@ -736,8 +739,8 @@ void constructScene() {
 	  // 	  			}
 			// }
 			for (int i = 0; i < cloud_final->points.size(); i++) {
-				glColor3f((float)cloud_final->points[i].r/255, (float)cloud_final->points[i].g/255, (float)cloud_final->points[i].b/255);
 				//glColor3f(1.0f, 1.0f, 1.0f);
+				glColor3f((float)cloud_final->points[i].r/255, (float)cloud_final->points[i].g/255, (float)cloud_final->points[i].b/255);
 				glVertex3f(cloud_final->points[i].x, cloud_final->points[i].y, cloud_final->points[i].z);
 			}
 		    glEnd();
