@@ -471,7 +471,7 @@ Matrix4f ICPalign(PointCloud<PointXYZRGB>::Ptr src_cloud,
 	icp.setInputTarget(tar_cloud);
 
 	// Set the max correspondence distance - correspondences with higher distances will be ignored
-	icp.setMaxCorrespondenceDistance(0.0001f);
+	icp.setMaxCorrespondenceDistance(0.01f);
 	// Set the maximum number of iterations
 	icp.setMaximumIterations(300);
 	// Set the transformation epsilon
